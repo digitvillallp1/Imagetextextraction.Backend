@@ -14,6 +14,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
+using System.Collections.Generic;
 
 namespace Imagetextextraction.Backend.Controllers
 {
@@ -25,23 +27,47 @@ namespace Imagetextextraction.Backend.Controllers
         private readonly GeminiService _geminiService;
         private readonly IHubContext<PrescriptionHub> _hubContext;
         private readonly ILogger<PrescriptionController> _logger;
+        private readonly IMemoryCache _cache;
 
         public PrescriptionController(
             ApplicationDbContext context,
             GeminiService geminiService,
             IHubContext<PrescriptionHub> hubContext,
-            ILogger<PrescriptionController> logger)
+            ILogger<PrescriptionController> logger,
+            IMemoryCache cache)
         {
             _context = context;
             _geminiService = geminiService;
             _hubContext = hubContext;
             _logger = logger;
+            _cache = cache;
         }
 
         // Endpoint: POST /api/prescription/upload
         [HttpPost("upload")]
         public async Task<IActionResult> UploadPrescription([FromForm] IFormFile file, [FromForm] string? connectionId)
         {
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
+            var cacheKey = $"rate_limit_{ip}";
+
+            // Get existing timestamps or create new list
+            var timestamps = _cache.GetOrCreate(cacheKey, entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(3);
+                return new List<DateTime>();
+            });
+
+            // Remove timestamps older than 3 hours
+            timestamps.RemoveAll(t => t < DateTime.UtcNow.AddHours(-3));
+
+            if (timestamps.Count >= 3)
+            {
+                return StatusCode(429, new { message = "You can only upload 3 prescriptions per 3 hours. Please try again later." });
+            }
+
+            timestamps.Add(DateTime.UtcNow);
+            _cache.Set(cacheKey, timestamps, TimeSpan.FromHours(3));
+
             if (file == null || file.Length == 0)
             {
                 return BadRequest("No file uploaded");
@@ -59,7 +85,7 @@ namespace Imagetextextraction.Backend.Controllers
                     }
                 }
 
-                await SendProgress("File uploaded. Reading buffer...");
+                await SendProgress("Uploading document...");
 
                 byte[] fileBytes;
                 string? imagePath = null;
@@ -75,7 +101,6 @@ namespace Imagetextextraction.Backend.Controllers
                 {
                     if (file.ContentType.StartsWith("image/"))
                     {
-                        await SendProgress("Compressing and saving image...");
                         var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
                         if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
                         
@@ -96,11 +121,11 @@ namespace Imagetextextraction.Backend.Controllers
                     _logger.LogWarning(imgEx, "Failed to compress or save image.");
                 }
 
-                await SendProgress("Gemini AI analyzing the document...");
+                await SendProgress("AI is reading handwriting...");
 
                 var structuredResult = await _geminiService.ProcessDocumentAsync(fileBytes, file.ContentType);
 
-                await SendProgress("Parsing document details...");
+                await SendProgress("Extracting text...");
 
                 // Parse Visit Date
                 DateTime? visitDate = null;
@@ -145,7 +170,7 @@ namespace Imagetextextraction.Backend.Controllers
                     }).ToList()
                 };
 
-                await SendProgress("Finalizing results...");
+                await SendProgress("Almost done...");
 
                 _context.Prescriptions.Add(prescription);
                 await _context.SaveChangesAsync();
