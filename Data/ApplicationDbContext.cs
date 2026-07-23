@@ -9,19 +9,11 @@ namespace Imagetextextraction.Backend.Data
         {
         }
 
-        public DbSet<Prescription> Prescriptions => Set<Prescription>();
-        public DbSet<Medication> Medications => Set<Medication>();
+        public DbSet<ScannedDocument> ScannedDocuments => Set<ScannedDocument>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-
-            // Configure Prescription to Medications relationship
-            modelBuilder.Entity<Prescription>()
-                .HasMany(p => p.Medications)
-                .WithOne(m => m.Prescription)
-                .HasForeignKey(m => m.PrescriptionId)
-                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

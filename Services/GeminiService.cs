@@ -24,29 +24,25 @@ namespace Imagetextextraction.Backend.Services
 
         public class StructuredPrescriptionResult
         {
-            public string clinicName { get; set; } = "N/A";
-            public string clinicPhone { get; set; } = "N/A";
-            public string doctorName { get; set; } = "N/A";
-            public string doctorRegistration { get; set; } = "N/A";
-            public string patientName { get; set; } = "N/A";
-            public string patientAge { get; set; } = "N/A";
-            public string patientGender { get; set; } = "N/A";
-            public string patientWeight { get; set; } = "N/A";
-            public string diagnosis { get; set; } = "N/A";
-            public string? dateOfVisit { get; set; }
+            public string documentType { get; set; } = "GENERAL";
+            public string personName { get; set; } = "N/A";
+            public string phoneNumber { get; set; } = "N/A";
+            public string? documentDate { get; set; }
             public string rawText { get; set; } = string.Empty;
             public string markdownText { get; set; } = string.Empty;
-            public List<StructuredMedication> medications { get; set; } = new();
+            public ExtractedData extractedData { get; set; } = new();
         }
 
-        public class StructuredMedication
+        public class ExtractedData
         {
-            public string name { get; set; } = string.Empty;
-            public string type { get; set; } = "N/A";
-            public string dosage { get; set; } = "N/A";
-            public string frequency { get; set; } = "N/A";
-            public string duration { get; set; } = "N/A";
-            public string instructions { get; set; } = "N/A";
+            public string? clinicName { get; set; }
+            public string? doctorName { get; set; }
+            public string? diagnosis { get; set; }
+            public object? medications { get; set; }
+            public string? invoiceTotal { get; set; }
+            public string? invoiceTax { get; set; }
+            public string? invoiceItems { get; set; }
+            public string? summary { get; set; }
         }
 
         public async Task<StructuredPrescriptionResult> ProcessDocumentAsync(byte[] fileBytes, string mimeType)
@@ -55,21 +51,26 @@ namespace Imagetextextraction.Backend.Services
             {
                 var base64Data = Convert.ToBase64String(fileBytes);
 
-                var prompt = @"Analyze the provided image or PDF of a doctor's prescription.
-You must return a JSON object with the following structure:
+                var prompt = @"Analyze the provided image or PDF document.
+First, determine the type of document. It could be a 'PRESCRIPTION', 'INVOICE', or 'GENERAL' document.
+Then, extract the information and return a JSON object with this exact structure:
 {
-  ""clinicName"": ""Clinic/Hospital name (string)"",
-  ""clinicPhone"": ""Phone number if visible (string)"",
-  ""doctorName"": ""Doctor name with titles (string)"",
-  ""doctorRegistration"": ""Registration number if visible (string)"",
-  ""patientName"": ""Patient name (string)"",
-  ""patientAge"": ""Patient age (string)"",
-  ""patientGender"": ""Patient gender (string)"",
-  ""patientWeight"": ""Patient weight (string)"",
-  ""diagnosis"": ""Diagnosis / Clinical description / Symptoms like URTI, cough (string)"",
-  ""dateOfVisit"": ""Date of visit in YYYY-MM-DD format (string, or null if not found)"",
-  ""rawText"": ""Exact text transcription of all handwriting on the prescription (string)"",
-  ""markdownText"": ""Exact text transcription. DO NOT generate any tables. Just plain text (string)""
+  ""documentType"": ""PRESCRIPTION | INVOICE | GENERAL"",
+  ""personName"": ""Person's name, Patient name, or Billed To (string)"",
+  ""phoneNumber"": ""Phone number of clinic, patient, or business if visible (string)"",
+  ""documentDate"": ""Date printed on the document in YYYY-MM-DD format (string, or null if not found)"",
+  ""rawText"": ""Exact text transcription of ALL text on the document, both PRINTED and HANDWRITTEN (string)"",
+  ""markdownText"": ""Exact text transcription of ALL text, both PRINTED and HANDWRITTEN. DO NOT generate any tables. Just plain text (string)"",
+  ""extractedData"": {
+     ""clinicName"": ""Clinic/Hospital name if PRESCRIPTION (string)"",
+     ""doctorName"": ""Doctor name with titles if PRESCRIPTION (string)"",
+     ""diagnosis"": ""Diagnosis / Clinical description if PRESCRIPTION (string)"",
+     ""medications"": ""Array of medicines if PRESCRIPTION (string)"",
+     ""invoiceTotal"": ""Total amount if INVOICE (string)"",
+     ""invoiceTax"": ""Tax amount if INVOICE (string)"",
+     ""invoiceItems"": ""Summary of items if INVOICE (string)"",
+     ""summary"": ""General summary if GENERAL document (string)""
+  }
 }
 
 Ensure all keys are populated. If a value is not found, use 'N/A' or null where appropriate. Do not return any other text, only the JSON.";
@@ -102,18 +103,32 @@ Ensure all keys are populated. If a value is not found, use 'N/A' or null where 
                 };
 
                 var jsonRequest = JsonSerializer.Serialize(requestBody);
-                var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
-
+                
                 var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={_apiKey}";
                 
-                _logger.LogInformation("Sending request to Gemini API (JSON mode)...");
-                var response = await _httpClient.PostAsync(url, content);
+                int maxRetries = 3;
+                HttpResponseMessage? response = null;
 
-                if (!response.IsSuccessStatusCode)
+                for (int i = 0; i < maxRetries; i++)
                 {
+                    _logger.LogInformation($"Sending request to Gemini API (JSON mode) - Attempt {i + 1}/{maxRetries}...");
+                    var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+                    response = await _httpClient.PostAsync(url, content);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        break;
+                    }
+
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError("Gemini API error response: {Error}", errorContent);
-                    throw new HttpRequestException($"Gemini API returned error: {response.StatusCode} - {response.ReasonPhrase}");
+                    _logger.LogWarning($"Gemini API error response (Attempt {i + 1}): {response.StatusCode} - {errorContent}");
+
+                    if (i == maxRetries - 1)
+                    {
+                        throw new HttpRequestException($"Gemini API returned error: {response.StatusCode} - {response.ReasonPhrase}");
+                    }
+
+                    await Task.Delay(2000 * (i + 1)); // Wait before retrying
                 }
 
                 var responseString = await response.Content.ReadAsStringAsync();
@@ -182,8 +197,7 @@ Ensure all keys are populated. If a value is not found, use 'N/A' or null where 
                         return new StructuredPrescriptionResult 
                         {
                             rawText = cleanText,
-                            markdownText = $"*Note: The AI struggled to format the result perfectly. Here is the raw extracted text:*\n\n{cleanText}",
-                            medications = new List<StructuredMedication>()
+                            markdownText = $"*Note: The AI struggled to format the result perfectly. Here is the raw extracted text:*\n\n{cleanText}"
                         };
                     }
                 }
