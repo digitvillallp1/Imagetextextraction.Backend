@@ -22,12 +22,14 @@ services:
       dockerfile: Dockerfile
     container_name: imagetext_backend
     restart: always
+    ports:
+      - "8080:8080" # Exposed backend port so you can access it directly
     depends_on:
       - db
     environment:
       - ConnectionStrings__DefaultConnection=Host=db;Database=imagetextdb;Username=postgres;Password=${DB_PASSWORD:-postgres123}
       - Gemini__ApiKey=${GEMINI_API_KEY}
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=Development
     volumes:
       - uploads:/app/wwwroot/uploads
     networks:
