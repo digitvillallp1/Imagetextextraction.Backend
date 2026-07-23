@@ -49,6 +49,13 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Auto-apply database migrations (essential for Docker deployment)
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    dbContext.Database.Migrate();
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
