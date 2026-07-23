@@ -47,7 +47,7 @@ namespace Imagetextextraction.Backend.Controllers
         // Endpoint: POST /api/document/upload
         // Notice we changed route from /api/prescription/upload to /api/document/upload
         [HttpPost("upload")]
-        public async Task<IActionResult> UploadDocument([FromForm] IFormFile file, [FromForm] string? connectionId, [FromForm] string? sessionId)
+        public async Task<IActionResult> UploadDocument([FromForm] IFormFile file, [FromForm] string? connectionId)
         {
             var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
             var cacheKey = $"rate_limit_{ip}";
@@ -152,8 +152,7 @@ namespace Imagetextextraction.Backend.Controllers
                     ExtractedText = string.IsNullOrEmpty(structuredResult.markdownText) ? structuredResult.rawText : structuredResult.markdownText,
                     ExtractedJson = JsonSerializer.Serialize(structuredResult.extractedData),
                     ImagePath = imagePath,
-                    UploadedAt = DateTime.SpecifyKind(istTime, DateTimeKind.Utc),
-                    SessionId = sessionId
+                    UploadedAt = DateTime.SpecifyKind(istTime, DateTimeKind.Utc)
                 };
 
                 await SendProgress("Almost done...");

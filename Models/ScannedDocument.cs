@@ -36,10 +36,5 @@ namespace Imagetextextraction.Backend.Models
         /// Standardized upload timestamp in IST
         /// </summary>
         public DateTime UploadedAt { get; set; }
-
-        /// <summary>
-        /// Tracks the anonymous browser session that uploaded this document
-        /// </summary>
-        public string? SessionId { get; set; }
     }
 }
